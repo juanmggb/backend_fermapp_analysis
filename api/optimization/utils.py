@@ -1,39 +1,19 @@
 import numpy as np
-from scipy.integrate import odeint
 from geneticalgorithm import geneticalgorithm as ga
 import plotly.graph_objs as go
-from plotly.subplots import make_subplots
 from django.conf import settings
 import os
 import uuid
+from api.utilis.numerical_methods import perform_simulation, algorithm_param
 
 
-def monod_model(y, t, mu, Y, Yp, Ks):
-    X, S, P = y
-    # X, S = y
-    dXdt = mu * X * S / (Ks + S)
-    dSdt = -Y * dXdt
-    dPdt = Yp * dXdt
-    return [dXdt, dSdt, dPdt]
-
-
-# Numerical integration of the ODE system
-
-
-def integrate_odes(params, t_values, x0, s0, p0):
-    mu, Y, Yp, Ks = params
-    initial_conditions = [x0, s0, p0]
-    solution = odeint(monod_model, initial_conditions, t_values, args=(mu, Y, Yp, Ks))
-    return solution[:, 0], solution[:, 1], solution[:, 2]  # Extract x, s and p
-
-
-# Mean squared error (MSE) for fitness evaluation
-
-
-def mse(params, t_values, x_values, s_values, p_values):
-    x_estimated, s_estimated, p_estimated = integrate_odes(
-        params, t_values, x_values[0], s_values[0], p_values[0]
+def mse(params, model, t_eval, x_values, s_values, p_values):
+    sol = perform_simulation(
+        model, [x_values[0], s_values[0], p_values[0]], t_eval, params
     )
+
+    x_estimated, s_estimated, p_estimated = sol.y[0, :], sol.y[1, :], sol.y[2, :]
+
     error = (
         np.sum((x_estimated - x_values) ** 2)
         + np.sum((s_estimated - s_values) ** 2)
@@ -42,29 +22,24 @@ def mse(params, t_values, x_values, s_values, p_values):
     return error
 
 
-def estimate_parameters(t_values, x_values, s_values, p_values):
-    # Genetic Algorithm parameters
-    algorithm_param = {
-        "max_num_iteration": 100,
-        "population_size": 100,
-        "mutation_probability": 0.1,
-        "elit_ratio": 0.01,
-        "crossover_probability": 0.5,
-        "parents_portion": 0.3,
-        "crossover_type": "uniform",
-        "max_iteration_without_improv": None,
-    }
-
-    # Parameter bounds for mu, k, and Y
-    varbound = np.array([[0, 3], [0, 1], [0, 20], [0, 20]])
-
+def estimate_parameters(model, t_eval, x_values, s_values, p_values):
     # Run genetic algorithm
+
+    # Parameter bounds for mu, k, and Yx and Yp
+    varbound = (
+        np.array([[0, 3], [0, 1], [0, 20], [0, 400]])
+        if (model == "monod")
+        else np.array([[0, 3], [0, 1], [0, 20], [0, 400], [0, 1]])
+    )
+
     model = ga(
-        function=lambda params: mse(params, t_values, x_values, s_values, p_values),
-        dimension=4,
+        function=lambda params: mse(
+            params, model, t_eval, x_values, s_values, p_values
+        ),
+        dimension=4 if (model == "monod") else 5,
         variable_type="real",
         variable_boundaries=varbound,
-        algorithm_parameters=algorithm_param,
+        algorithm_parameters={**algorithm_param, "n_jobs": -1},  # Use all CPU cores
     )
     model.run()
 
@@ -80,9 +55,12 @@ def generate_plot(best_params, t_values, x_values, s_values, p_values):
         if filename.endswith(".html"):
             os.remove(os.path.join(optimization_dir, filename))
 
-    x_estimated, s_estimated, p_estimated = integrate_odes(
-        best_params, t_values, x_values[0], s_values[0], p_values[0]
+    mu, Yx, Yp, Ks = best_params
+    sol = perform_simulation(
+        x_values[0], s_values[0], p_values[0], t_values, mu, Yx, Yp, Ks
     )
+
+    x_estimated, s_estimated, p_estimated = sol.y[0, :], sol.y[1, :], sol.y[2, :]
 
     # Create a plot with all the variables
     fig = go.Figure()
