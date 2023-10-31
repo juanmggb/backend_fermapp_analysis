@@ -27,7 +27,7 @@ def simulation(request):
     tf = request.data.get("tf")
 
     # Check that all inputs are provided
-    if any(val is None for val in [mu, Y, Yp, Ks, Ki, X0, S0, P0, step_size, tf]):
+    if any(val is None for val in [mu, Y, Yp, Ks, X0, S0, P0, step_size, tf]):
         return Response(
             {"error": "All inputs are required"}, status=status.HTTP_400_BAD_REQUEST
         )
@@ -38,18 +38,23 @@ def simulation(request):
     Y = float(Y)
     Yp = float(Yp)
     Ks = float(Ks)
-    Ki = float(Ki)
     X0 = float(X0)
     S0 = float(S0)
     P0 = float(P0)
     step_size = float(step_size)
     tf = float(tf)
 
+    if Ki is not None:
+        Ki = float(Ki)
+        params = (mu, Y, Yp, Ks, Ki)
+    else:
+        params = (mu, Y, Yp, Ks)
+
     # Perform simulation
 
     # Create an array of time points with the specified step size
     t_eval = np.arange(0, tf + step_size, step_size)
-    sol = perform_simulation(model, [X0, S0, P0], t_eval, (mu, Y, Yp, Ks, Ki))
+    sol = perform_simulation(model, [X0, S0, P0], t_eval, params)
 
     # Serialize the simulation results
     time_data = sol.t.tolist()
